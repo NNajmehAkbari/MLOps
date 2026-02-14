@@ -1,23 +1,39 @@
-Climate DataOps Pipeline
-Execution Flow
-Security Setup: Enter your Kaggle API key into the Databricks text widget to securely set environment variables.
+# Climate DataOps Pipeline
 
-Ingestion: The script fetches data via the Kaggle API, loads it into a Pandas buffer to bypass filesystem restrictions, and converts it to a Spark DataFrame.
+## Execution Flow
 
-Medallion Pipeline:
+1. **Security Setup**
+   - Enter your **Kaggle API key** into a **Databricks text widget** to securely set environment variables.
 
-Bronze: Data is appended in 5 batches.
+2. **Ingestion**
+   - The script fetches data via the **Kaggle API**.
+   - It loads the data into a **Pandas buffer** to bypass filesystem restrictions.
+   - Then it converts the dataset to a **Spark DataFrame**.
 
-Silver: Deduplication and outlier removal are performed.
+3. **Medallion Pipeline**
+   - **Bronze:** Data is appended in **5 batches**.
+   - **Silver:** **Deduplication** and **outlier removal** are performed.
+   - **Gold:** **Lag features** are generated for **time-series forecasting**.
 
-Gold: Lag features are generated for time-series forecasting.
+---
 
-Assumptions
-Temporal Order: It is assumed that data is sorted by date before batching to maintain time-series integrity.
+## Assumptions
 
-Data Frequency: The pipeline assumes daily climate readings from the Delhi dataset.
+- **Temporal Order**
+  - Data is assumed to be **sorted by date** before batching to maintain **time-series integrity**.
 
-Security & Reproducibility
-Credentials are never hard-coded; they are managed via Databricks secrets/widgets.
+- **Data Frequency**
+  - The pipeline assumes **daily climate readings** from the **Delhi dataset**.
 
-Versioning: The pipeline's history can be audited using %sql DESCRIBE HISTORY weather_bronze.
+---
+
+## Security & Reproducibility
+
+- **No hard-coded credentials**
+  - Credentials are **never hard-coded** and are managed via **Databricks secrets/widgets**.
+
+- **Versioning / Auditability**
+  - The pipeline history can be audited using:
+
+  ```sql
+  %sql DESCRIBE HISTORY weather_bronze
