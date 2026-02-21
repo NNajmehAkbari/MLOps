@@ -1,0 +1,3698 @@
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": 0,
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "188901c7-44b1-4513-bff0-36d7f7d3cc11",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "outputs": [],
+   "source": [
+    "import os\n",
+    "import json\n",
+    "import subprocess\n",
+    "\n",
+    "# --- Third-party ---\n",
+    "import numpy as np\n",
+    "import pandas as pd\n",
+    "\n",
+    "# --- PySpark ---\n",
+    "from pyspark.sql.functions import col, lag\n",
+    "from pyspark.sql.window import Window\n",
+    "\n",
+    "# --- scikit-learn ---\n",
+    "from sklearn.linear_model import LinearRegression\n",
+    "from sklearn.metrics import mean_squared_error, mean_absolute_error\n",
+    "\n",
+    "# --- MLflow ---\n",
+    "import mlflow\n",
+    "import mlflow.sklearn\n",
+    "from mlflow.models.signature import ModelSignature\n",
+    "from mlflow.types.schema import Schema, ColSpec"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 0,
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "collapsed": true,
+     "inputWidgets": {},
+     "nuid": "b8d091e6-b343-4b7b-beb8-e8de0112d1c5",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "outputs": [
+    {
+     "output_type": "stream",
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Requirement already satisfied: kaggle in /local_disk0/.ephemeral_nfs/envs/pythonEnv-1e5a7931-27a7-44cc-9d4e-6bfe265dc0a2/lib/python3.12/site-packages (2.0.0)\nRequirement already satisfied: bleach in /databricks/python3/lib/python3.12/site-packages (from kaggle) (6.2.0)\nRequirement already satisfied: kagglesdk<1.0,>=0.1.15 in /local_disk0/.ephemeral_nfs/envs/pythonEnv-1e5a7931-27a7-44cc-9d4e-6bfe265dc0a2/lib/python3.12/site-packages (from kaggle) (0.1.15)\nRequirement already satisfied: packaging in /databricks/python3/lib/python3.12/site-packages (from kaggle) (24.1)\nRequirement already satisfied: protobuf in /databricks/python3/lib/python3.12/site-packages (from kaggle) (5.29.4)\nRequirement already satisfied: python-dateutil in /databricks/python3/lib/python3.12/site-packages (from kaggle) (2.9.0.post0)\nRequirement already satisfied: python-slugify in /local_disk0/.ephemeral_nfs/envs/pythonEnv-1e5a7931-27a7-44cc-9d4e-6bfe265dc0a2/lib/python3.12/site-packages (from kaggle) (8.0.4)\nRequirement already satisfied: requests in /databricks/python3/lib/python3.12/site-packages (from kaggle) (2.32.3)\nRequirement already satisfied: tqdm in /local_disk0/.ephemeral_nfs/envs/pythonEnv-1e5a7931-27a7-44cc-9d4e-6bfe265dc0a2/lib/python3.12/site-packages (from kaggle) (4.67.3)\nRequirement already satisfied: urllib3>=1.15.1 in /databricks/python3/lib/python3.12/site-packages (from kaggle) (2.3.0)\nRequirement already satisfied: webencodings in /databricks/python3/lib/python3.12/site-packages (from bleach->kaggle) (0.5.1)\nRequirement already satisfied: six>=1.5 in /usr/lib/python3/dist-packages (from python-dateutil->kaggle) (1.16.0)\nRequirement already satisfied: text-unidecode>=1.3 in /local_disk0/.ephemeral_nfs/envs/pythonEnv-1e5a7931-27a7-44cc-9d4e-6bfe265dc0a2/lib/python3.12/site-packages (from python-slugify->kaggle) (1.3)\nRequirement already satisfied: charset-normalizer<4,>=2 in /databricks/python3/lib/python3.12/site-packages (from requests->kaggle) (3.3.2)\nRequirement already satisfied: idna<4,>=2.5 in /databricks/python3/lib/python3.12/site-packages (from requests->kaggle) (3.7)\nRequirement already satisfied: certifi>=2017.4.17 in /databricks/python3/lib/python3.12/site-packages (from requests->kaggle) (2025.1.31)\n\u001B[43mNote: you may need to restart the kernel using %restart_python or dbutils.library.restartPython() to use updated packages.\u001B[0m\n"
+     ]
+    }
+   ],
+   "source": [
+    "%pip install kaggle"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 0,
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "f4d54289-31bb-41b8-9b48-bcfce8275bad",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "outputs": [],
+   "source": [
+    "# Create a hidden text input box at the top of the notebook\n",
+    "dbutils.widgets.text(\"kaggle_key_input\", \"\", \"Enter Kaggle Key\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 0,
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "4c4a3ac8-41ef-4666-aba7-8455ff7bf12e",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "outputs": [
+    {
+     "output_type": "stream",
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "INFO:py4j.clientserver:Received command c on object id p0\n"
+     ]
+    },
+    {
+     "output_type": "stream",
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Kaggle is settled!\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Get the value from the widget\n",
+    "secret_key = dbutils.widgets.get(\"kaggle_key_input\")\n",
+    "os.environ['KAGGLE_KEY'] = secret_key\n",
+    "print(\"Kaggle is settled!\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 0,
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "efc760b6-1895-4f77-bda5-cf6061346ff7",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "outputs": [
+    {
+     "output_type": "stream",
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Dataset URL: https://www.kaggle.com/datasets/sumanthvrao/daily-climate-time-series-data\nLicense(s): CC0-1.0\nDownloading daily-climate-time-series-data.zip to /Workspace/Users/n.najmehakbari@gmail.com/Drafts\n"
+     ]
+    },
+    {
+     "output_type": "stream",
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "\r  0%|          | 0.00/22.0k [00:00<?, ?B/s]\r100%|██████████| 22.0k/22.0k [00:00<00:00, 5.07MB/s]\n"
+     ]
+    },
+    {
+     "output_type": "stream",
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "\n"
+     ]
+    },
+    {
+     "output_type": "execute_result",
+     "data": {
+      "text/plain": [
+       "CompletedProcess(args=['kaggle', 'datasets', 'download', '-d', 'sumanthvrao/daily-climate-time-series-data', '--unzip'], returncode=0)"
+      ]
+     },
+     "execution_count": 47,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "subprocess.run(['kaggle', 'datasets', 'download', '-d', 'sumanthvrao/daily-climate-time-series-data', '--unzip'])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 0,
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "cbe008d6-96aa-48a8-917a-d8483d329663",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "outputs": [
+    {
+     "output_type": "stream",
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Data successfully loaded into Spark via Pandas!\n"
+     ]
+    },
+    {
+     "output_type": "display_data",
+     "data": {
+      "text/html": [
+       "<style scoped>\n",
+       "  .table-result-container {\n",
+       "    max-height: 300px;\n",
+       "    overflow: auto;\n",
+       "  }\n",
+       "  table, th, td {\n",
+       "    border: 1px solid black;\n",
+       "    border-collapse: collapse;\n",
+       "  }\n",
+       "  th, td {\n",
+       "    padding: 5px;\n",
+       "  }\n",
+       "  th {\n",
+       "    text-align: left;\n",
+       "  }\n",
+       "</style><div class='table-result-container'><table class='table-result'><thead style='background-color: white'><tr><th>date</th><th>meantemp</th><th>humidity</th><th>wind_speed</th><th>meanpressure</th></tr></thead><tbody><tr><td>2013-01-01</td><td>10.0</td><td>84.5</td><td>0.0</td><td>1015.6666666666666</td></tr><tr><td>2013-01-02</td><td>7.4</td><td>92.0</td><td>2.98</td><td>1017.8</td></tr><tr><td>2013-01-03</td><td>7.166666666666667</td><td>87.0</td><td>4.633333333333334</td><td>1018.6666666666666</td></tr><tr><td>2013-01-04</td><td>8.666666666666666</td><td>71.33333333333333</td><td>1.2333333333333334</td><td>1017.1666666666666</td></tr><tr><td>2013-01-05</td><td>6.0</td><td>86.83333333333333</td><td>3.7</td><td>1016.5</td></tr></tbody></table></div>"
+      ]
+     },
+     "metadata": {
+      "application/vnd.databricks.v1+output": {
+       "addedWidgets": {},
+       "aggData": [],
+       "aggError": "",
+       "aggOverflow": false,
+       "aggSchema": [],
+       "aggSeriesLimitReached": false,
+       "aggType": "",
+       "arguments": {},
+       "columnCustomDisplayInfos": {},
+       "data": [
+        [
+         "2013-01-01",
+         10.0,
+         84.5,
+         0.0,
+         1015.6666666666666
+        ],
+        [
+         "2013-01-02",
+         7.4,
+         92.0,
+         2.98,
+         1017.8
+        ],
+        [
+         "2013-01-03",
+         7.166666666666667,
+         87.0,
+         4.633333333333334,
+         1018.6666666666666
+        ],
+        [
+         "2013-01-04",
+         8.666666666666666,
+         71.33333333333333,
+         1.2333333333333334,
+         1017.1666666666666
+        ],
+        [
+         "2013-01-05",
+         6.0,
+         86.83333333333333,
+         3.7,
+         1016.5
+        ]
+       ],
+       "datasetInfos": [],
+       "dbfsResultPath": null,
+       "isJsonSchema": true,
+       "metadata": {},
+       "overflow": false,
+       "plotOptions": {
+        "customPlotOptions": {},
+        "displayType": "table",
+        "pivotAggregation": null,
+        "pivotColumns": null,
+        "xColumns": null,
+        "yColumns": null
+       },
+       "removedWidgets": [],
+       "schema": [
+        {
+         "metadata": "{}",
+         "name": "date",
+         "type": "\"string\""
+        },
+        {
+         "metadata": "{}",
+         "name": "meantemp",
+         "type": "\"double\""
+        },
+        {
+         "metadata": "{}",
+         "name": "humidity",
+         "type": "\"double\""
+        },
+        {
+         "metadata": "{}",
+         "name": "wind_speed",
+         "type": "\"double\""
+        },
+        {
+         "metadata": "{}",
+         "name": "meanpressure",
+         "type": "\"double\""
+        }
+       ],
+       "type": "table"
+      }
+     },
+     "output_type": "display_data"
+    }
+   ],
+   "source": [
+    "\n",
+    "local_path = f\"{os.getcwd()}/DailyDelhiClimateTrain.csv\"\n",
+    "pdf = pd.read_csv(local_path)\n",
+    "\n",
+    "# Pandas DataFrame to Spark DataFrame\n",
+    "df_all = spark.createDataFrame(pdf)\n",
+    "df_all = df_all.orderBy(\"date\")\n",
+    "\n",
+    "print(\"Data successfully loaded into Spark via Pandas!\")\n",
+    "display(df_all.limit(5))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 0,
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "55b8092b-b179-4309-9d81-aff1c233e158",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "outputs": [
+    {
+     "output_type": "stream",
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Batch 1 ingested into Bronze layer.\nBatch 2 ingested into Bronze layer.\nBatch 3 ingested into Bronze layer.\nBatch 4 ingested into Bronze layer.\nBatch 5 ingested into Bronze layer.\n"
+     ]
+    }
+   ],
+   "source": [
+    "total_rows = df_all.count()\n",
+    "chunk_size = total_rows // 5\n",
+    "\n",
+    "for i in range(5):\n",
+    "    start = i * chunk_size\n",
+    "    limit_val = (i + 1) * chunk_size if i < 4 else total_rows\n",
+    "    \n",
+    "    # Create a Spark DataFrame for the current batch\n",
+    "    current_batch = df_all.limit(limit_val).tail(limit_val - start)\n",
+    "    batch_spark = spark.createDataFrame(current_batch, df_all.schema)\n",
+    "    \n",
+    "    # Bronze layer ingestion\n",
+    "    batch_spark.write.format(\"delta\").mode(\"append\").saveAsTable(\"weather_bronze\")\n",
+    "    print(f\"Batch {i+1} ingested into Bronze layer.\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 0,
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "8c4464a5-abf9-4e08-95bd-2d004cbc40e7",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "outputs": [],
+   "source": [
+    "# Read from Bronze layer\n",
+    "bronze_df = spark.read.table(\"weather_bronze\")\n",
+    "\n",
+    "# Silver layer ingestion \n",
+    "silver_df = bronze_df.dropDuplicates([\"date\"]).dropna()\n",
+    "\n",
+    "# Remove outliers from meantemp column in Silver layer\n",
+    "silver_df = silver_df.filter((col(\"meantemp\") > -20) & (col(\"meantemp\") < 60))\n",
+    "\n",
+    "# Write to Silver layer\n",
+    "silver_df.write.format(\"delta\").mode(\"overwrite\").saveAsTable(\"weather_silver\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 0,
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "6273ed9b-6f1a-47ec-b625-c6b2b50abd07",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "outputs": [
+    {
+     "output_type": "stream",
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "/databricks/python/lib/python3.12/site-packages/pyspark/sql/connect/expressions.py:1134: UserWarning: WARN WindowExpression: No Partition Defined for Window operation! Moving all data to a single partition, this can cause serious performance degradation.\n  warnings.warn(\n"
+     ]
+    },
+    {
+     "output_type": "stream",
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Gold table created successfully!\n"
+     ]
+    }
+   ],
+   "source": [
+    "\n",
+    "# Read from Silver layer\n",
+    "silver_df = spark.read.table(\"weather_silver\")\n",
+    "\n",
+    "# Define a window specification\n",
+    "windowSpec = Window.orderBy(\"date\")\n",
+    "\n",
+    "# Gold layer ingestion(Feature Engineering)\n",
+    "gold_df = silver_df.withColumn(\"prev_day_temp\", lag(\"meantemp\", 1).over(windowSpec))\n",
+    "\n",
+    "#  Remove rows with null values\n",
+    "gold_df = gold_df.select(\"date\", \"prev_day_temp\", \"meantemp\").dropna()\n",
+    "\n",
+    "# Write to Gold layer \n",
+    "gold_df.write.format(\"delta\").mode(\"overwrite\").saveAsTable(\"weather_gold\")\n",
+    "\n",
+    "print(\"Gold table created successfully!\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 0,
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "implicitDf": true,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "67535eea-9fda-46fd-95b6-6407aa61383a",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "outputs": [
+    {
+     "output_type": "display_data",
+     "data": {
+      "text/html": [
+       "<style scoped>\n",
+       "  .table-result-container {\n",
+       "    max-height: 300px;\n",
+       "    overflow: auto;\n",
+       "  }\n",
+       "  table, th, td {\n",
+       "    border: 1px solid black;\n",
+       "    border-collapse: collapse;\n",
+       "  }\n",
+       "  th, td {\n",
+       "    padding: 5px;\n",
+       "  }\n",
+       "  th {\n",
+       "    text-align: left;\n",
+       "  }\n",
+       "</style><div class='table-result-container'><table class='table-result'><thead style='background-color: white'><tr><th>version</th><th>timestamp</th><th>userId</th><th>userName</th><th>operation</th><th>operationParameters</th><th>job</th><th>notebook</th><th>queryHistoryStatementId</th><th>clusterId</th><th>readVersion</th><th>isolationLevel</th><th>isBlindAppend</th><th>operationMetrics</th><th>userMetadata</th><th>engineInfo</th></tr></thead><tbody><tr><td>50</td><td>2026-02-21T15:19:22.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>98c9e26c-2795-46e5-aaf2-85efed579d8f</td><td>0221-145446-ohe4wj7y-v2n</td><td>49</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 294, numOutputBytes -> 9549)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>49</td><td>2026-02-21T15:19:19.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>aec510cf-d060-4b0a-bd9b-b2b572e4b966</td><td>0221-145446-ohe4wj7y-v2n</td><td>48</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7907)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>48</td><td>2026-02-21T15:19:17.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>a925e671-e3fa-4b1f-a7f7-86c683f4e1c8</td><td>0221-145446-ohe4wj7y-v2n</td><td>47</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7226)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>47</td><td>2026-02-21T15:19:14.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>e7817db9-5dde-4f73-8aa5-ffea0c805a8a</td><td>0221-145446-ohe4wj7y-v2n</td><td>46</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7592)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>46</td><td>2026-02-21T15:19:12.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>397b4095-af05-4abf-bbb6-5a30210fcca6</td><td>0221-145446-ohe4wj7y-v2n</td><td>45</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 8288)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>45</td><td>2026-02-21T15:01:24.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>f1cba034-0eab-4968-b6d0-556540def256</td><td>0221-145446-ohe4wj7y-v2n</td><td>44</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 294, numOutputBytes -> 9549)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>44</td><td>2026-02-21T15:01:20.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>0096bbfe-e069-4a6e-a09d-9357977f8da2</td><td>0221-145446-ohe4wj7y-v2n</td><td>43</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7907)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>43</td><td>2026-02-21T15:01:17.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>40bb8e89-7ebe-4571-91b5-a8d0f52e1bcd</td><td>0221-145446-ohe4wj7y-v2n</td><td>42</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7226)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>42</td><td>2026-02-21T15:01:14.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>808481cc-9291-4834-95c5-b846de8a3e3b</td><td>0221-145446-ohe4wj7y-v2n</td><td>41</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7592)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>41</td><td>2026-02-21T15:01:11.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>0ab4c255-a4d7-4b01-96b0-9878fe433689</td><td>0221-145446-ohe4wj7y-v2n</td><td>40</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 8288)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>40</td><td>2026-02-21T11:44:38.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>0ea7c2ab-9665-4998-b598-3b729235cc41</td><td>0221-103811-ebtpy15-v2n</td><td>39</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 294, numOutputBytes -> 9548)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>39</td><td>2026-02-21T11:44:36.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>07f8527a-ce2d-4eec-9edd-d77bd091790f</td><td>0221-103811-ebtpy15-v2n</td><td>38</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7906)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>38</td><td>2026-02-21T11:44:34.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>1838dbd3-cccc-49e0-a30d-85fd0eefbff5</td><td>0221-103811-ebtpy15-v2n</td><td>37</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7225)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>37</td><td>2026-02-21T11:44:31.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>40f29e08-2f03-4adc-8bd5-08fd5decb4d1</td><td>0221-103811-ebtpy15-v2n</td><td>36</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7591)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>36</td><td>2026-02-21T11:44:29.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>695af57f-a5fe-4cc9-9f40-ef0ccce1fa28</td><td>0221-103811-ebtpy15-v2n</td><td>35</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 8287)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>35</td><td>2026-02-21T11:36:53.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>8560d47a-0803-44fc-b208-0dd82bf55533</td><td>0221-103811-ebtpy15-v2n</td><td>34</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 294, numOutputBytes -> 9548)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>34</td><td>2026-02-21T11:36:51.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>ff678215-173b-45cf-93b0-68f43514f025</td><td>0221-103811-ebtpy15-v2n</td><td>32</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7906, conflictDetectionTimeMs -> 119)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>33</td><td>2026-02-21T11:36:50.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>OPTIMIZE</td><td>Map(predicate -> [], auto -> true, clusterBy -> [], zOrderBy -> [], batchId -> 0)</td><td>null</td><td>List(2199524748115638)</td><td>39943e97-6398-465b-8276-68555de40306</td><td>0221-103811-ebtpy15-v2n</td><td>31</td><td>SnapshotIsolation</td><td>false</td><td>Map(numRemovedFiles -> 32, numRemovedBytes -> 259240, p25FileSize -> 54479, numDeletionVectorsRemoved -> 0, conflictDetectionTimeMs -> 85, minFileSize -> 54479, numAddedFiles -> 1, maxFileSize -> 54479, p75FileSize -> 54479, p50FileSize -> 54479, numAddedBytes -> 54479)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>32</td><td>2026-02-21T11:36:48.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>a3baa1f4-2c6a-4abe-a742-8378cf969b33</td><td>0221-103811-ebtpy15-v2n</td><td>31</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7225)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>31</td><td>2026-02-21T11:36:46.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>39943e97-6398-465b-8276-68555de40306</td><td>0221-103811-ebtpy15-v2n</td><td>30</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7591)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>30</td><td>2026-02-21T11:36:44.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>745fb7ed-ad7f-477a-9f40-862739d9534d</td><td>0221-103811-ebtpy15-v2n</td><td>29</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 8287)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>29</td><td>2026-02-21T11:12:56.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>e5219e76-3641-4c0c-b8b3-c856071d4a4f</td><td>0221-103811-ebtpy15-v2n</td><td>28</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 294, numOutputBytes -> 9548)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>28</td><td>2026-02-21T11:12:54.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>ff9f41d2-8bab-4fe6-8fd6-4c653c7cf4ce</td><td>0221-103811-ebtpy15-v2n</td><td>27</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7906)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>27</td><td>2026-02-21T11:12:52.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>f928f416-ebdc-4abc-85f3-805fc24dd3a5</td><td>0221-103811-ebtpy15-v2n</td><td>26</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7225)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>26</td><td>2026-02-21T11:12:49.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>326b1588-43d0-4dd7-8a0c-c98424bcec03</td><td>0221-103811-ebtpy15-v2n</td><td>25</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7591)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>25</td><td>2026-02-21T11:12:47.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>7e6f92bb-3b0f-47a9-bedf-ae614cf17ef6</td><td>0221-103811-ebtpy15-v2n</td><td>24</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 8287)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>24</td><td>2026-02-21T10:40:11.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>0ead2f4b-3688-48bf-9598-62e5e0e88b63</td><td>0221-103811-ebtpy15-v2n</td><td>23</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 294, numOutputBytes -> 9548)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>23</td><td>2026-02-21T10:40:08.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>0221fe69-faf2-4cb1-a0b4-9a45c835d829</td><td>0221-103811-ebtpy15-v2n</td><td>22</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7906)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>22</td><td>2026-02-21T10:40:06.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>08d668f9-d8b4-41d7-b4e3-80da1fb78108</td><td>0221-103811-ebtpy15-v2n</td><td>21</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7225)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>21</td><td>2026-02-21T10:40:03.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>75ecf505-5757-45b1-8fa4-aeb57193f89f</td><td>0221-103811-ebtpy15-v2n</td><td>20</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7591)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>20</td><td>2026-02-21T10:40:00.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>f9d9eaa5-7ebb-4c4c-889b-7a563b7b62f3</td><td>0221-103811-ebtpy15-v2n</td><td>19</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 8287)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>19</td><td>2026-02-14T13:11:38.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>bdae819e-5f61-4fad-a732-85ad6826b9e8</td><td>0214-131041-o32588r7-v2n</td><td>18</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 294, numOutputBytes -> 9549)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>18</td><td>2026-02-14T13:11:34.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>b2661235-e66f-4b08-9cfb-dd02854d4293</td><td>0214-131041-o32588r7-v2n</td><td>17</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7907)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>17</td><td>2026-02-14T13:11:31.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>d251affb-c459-4681-9b70-7f4063736b96</td><td>0214-131041-o32588r7-v2n</td><td>16</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7226)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>16</td><td>2026-02-14T13:11:28.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>daf13785-6086-4ac5-94e1-488385596f88</td><td>0214-131041-o32588r7-v2n</td><td>15</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7592)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>15</td><td>2026-02-14T13:11:24.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>456777b4-1f00-4d40-ba8a-ab1b85483477</td><td>0214-131041-o32588r7-v2n</td><td>14</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 8288)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>14</td><td>2026-02-13T21:08:16.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>d88d7225-fc19-49c2-9939-1bce4748cb07</td><td>0213-210635-16sj3sfp-v2n</td><td>13</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 294, numOutputBytes -> 9549)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>13</td><td>2026-02-13T21:08:13.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>3850ce70-1af5-46a7-b0fa-e705bc48d269</td><td>0213-210635-16sj3sfp-v2n</td><td>12</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7907)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>12</td><td>2026-02-13T21:08:10.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>06caafa3-1d52-43c3-a086-4f3ec0893869</td><td>0213-210635-16sj3sfp-v2n</td><td>11</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7226)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>11</td><td>2026-02-13T21:08:07.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>8ab482a6-b830-481a-b12b-589cd218fd4a</td><td>0213-210635-16sj3sfp-v2n</td><td>10</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7592)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>10</td><td>2026-02-13T21:08:04.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>c230d9d5-1c9f-4a24-ab01-404000841953</td><td>0213-210635-16sj3sfp-v2n</td><td>9</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 8288)</td><td>null</td><td>Databricks-Runtime/18.0.x-aarch64-photon-scala2.13</td></tr><tr><td>9</td><td>2026-02-10T21:56:12.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>null</td><td>0210-214128-2adgjkrl-v2n</td><td>8</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 294, numOutputBytes -> 9549)</td><td>null</td><td>Databricks-Runtime/17.3.x-aarch64-photon-scala2.13</td></tr><tr><td>8</td><td>2026-02-10T21:56:10.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>null</td><td>0210-214128-2adgjkrl-v2n</td><td>7</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7907)</td><td>null</td><td>Databricks-Runtime/17.3.x-aarch64-photon-scala2.13</td></tr><tr><td>7</td><td>2026-02-10T21:56:08.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>null</td><td>0210-214128-2adgjkrl-v2n</td><td>6</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7226)</td><td>null</td><td>Databricks-Runtime/17.3.x-aarch64-photon-scala2.13</td></tr><tr><td>6</td><td>2026-02-10T21:56:06.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>null</td><td>0210-214128-2adgjkrl-v2n</td><td>5</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7592)</td><td>null</td><td>Databricks-Runtime/17.3.x-aarch64-photon-scala2.13</td></tr><tr><td>5</td><td>2026-02-10T21:56:04.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>null</td><td>0210-214128-2adgjkrl-v2n</td><td>4</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 8288)</td><td>null</td><td>Databricks-Runtime/17.3.x-aarch64-photon-scala2.13</td></tr><tr><td>4</td><td>2026-02-10T21:48:44.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>null</td><td>0210-214128-2adgjkrl-v2n</td><td>3</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 294, numOutputBytes -> 9549)</td><td>null</td><td>Databricks-Runtime/17.3.x-aarch64-photon-scala2.13</td></tr><tr><td>3</td><td>2026-02-10T21:48:42.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>null</td><td>0210-214128-2adgjkrl-v2n</td><td>2</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7907)</td><td>null</td><td>Databricks-Runtime/17.3.x-aarch64-photon-scala2.13</td></tr><tr><td>2</td><td>2026-02-10T21:48:39.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> true, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>null</td><td>0210-214128-2adgjkrl-v2n</td><td>1</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7226)</td><td>null</td><td>Databricks-Runtime/17.3.x-aarch64-photon-scala2.13</td></tr><tr><td>1</td><td>2026-02-10T21:48:37.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>WRITE</td><td>Map(mode -> Append, statsOnLoad -> false, partitionBy -> [])</td><td>null</td><td>List(2199524748115638)</td><td>null</td><td>0210-214128-2adgjkrl-v2n</td><td>0</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 7592)</td><td>null</td><td>Databricks-Runtime/17.3.x-aarch64-photon-scala2.13</td></tr><tr><td>0</td><td>2026-02-10T21:48:35.000Z</td><td>71445245683791</td><td>n.najmehakbari@gmail.com</td><td>CREATE TABLE AS SELECT</td><td>Map(partitionBy -> [], clusterBy -> [], description -> null, isManaged -> true, properties -> {\"delta.enableDeletionVectors\":\"true\"}, statsOnLoad -> true)</td><td>null</td><td>List(2199524748115638)</td><td>null</td><td>0210-214128-2adgjkrl-v2n</td><td>null</td><td>WriteSerializable</td><td>true</td><td>Map(numFiles -> 1, numOutputRows -> 292, numOutputBytes -> 8288)</td><td>null</td><td>Databricks-Runtime/17.3.x-aarch64-photon-scala2.13</td></tr></tbody></table></div>"
+      ]
+     },
+     "metadata": {
+      "application/vnd.databricks.v1+output": {
+       "addedWidgets": {},
+       "aggData": [],
+       "aggError": "",
+       "aggOverflow": false,
+       "aggSchema": [],
+       "aggSeriesLimitReached": false,
+       "aggType": "",
+       "arguments": {},
+       "columnCustomDisplayInfos": {},
+       "data": [
+        [
+         50,
+         "2026-02-21T15:19:22.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "98c9e26c-2795-46e5-aaf2-85efed579d8f",
+         "0221-145446-ohe4wj7y-v2n",
+         49,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "9549",
+          "numOutputRows": "294"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         49,
+         "2026-02-21T15:19:19.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "aec510cf-d060-4b0a-bd9b-b2b572e4b966",
+         "0221-145446-ohe4wj7y-v2n",
+         48,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7907",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         48,
+         "2026-02-21T15:19:17.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "a925e671-e3fa-4b1f-a7f7-86c683f4e1c8",
+         "0221-145446-ohe4wj7y-v2n",
+         47,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7226",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         47,
+         "2026-02-21T15:19:14.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "e7817db9-5dde-4f73-8aa5-ffea0c805a8a",
+         "0221-145446-ohe4wj7y-v2n",
+         46,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7592",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         46,
+         "2026-02-21T15:19:12.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "397b4095-af05-4abf-bbb6-5a30210fcca6",
+         "0221-145446-ohe4wj7y-v2n",
+         45,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "8288",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         45,
+         "2026-02-21T15:01:24.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "f1cba034-0eab-4968-b6d0-556540def256",
+         "0221-145446-ohe4wj7y-v2n",
+         44,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "9549",
+          "numOutputRows": "294"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         44,
+         "2026-02-21T15:01:20.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "0096bbfe-e069-4a6e-a09d-9357977f8da2",
+         "0221-145446-ohe4wj7y-v2n",
+         43,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7907",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         43,
+         "2026-02-21T15:01:17.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "40bb8e89-7ebe-4571-91b5-a8d0f52e1bcd",
+         "0221-145446-ohe4wj7y-v2n",
+         42,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7226",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         42,
+         "2026-02-21T15:01:14.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "808481cc-9291-4834-95c5-b846de8a3e3b",
+         "0221-145446-ohe4wj7y-v2n",
+         41,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7592",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         41,
+         "2026-02-21T15:01:11.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "0ab4c255-a4d7-4b01-96b0-9878fe433689",
+         "0221-145446-ohe4wj7y-v2n",
+         40,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "8288",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         40,
+         "2026-02-21T11:44:38.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "0ea7c2ab-9665-4998-b598-3b729235cc41",
+         "0221-103811-ebtpy15-v2n",
+         39,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "9548",
+          "numOutputRows": "294"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         39,
+         "2026-02-21T11:44:36.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "07f8527a-ce2d-4eec-9edd-d77bd091790f",
+         "0221-103811-ebtpy15-v2n",
+         38,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7906",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         38,
+         "2026-02-21T11:44:34.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "1838dbd3-cccc-49e0-a30d-85fd0eefbff5",
+         "0221-103811-ebtpy15-v2n",
+         37,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7225",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         37,
+         "2026-02-21T11:44:31.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "40f29e08-2f03-4adc-8bd5-08fd5decb4d1",
+         "0221-103811-ebtpy15-v2n",
+         36,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7591",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         36,
+         "2026-02-21T11:44:29.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "695af57f-a5fe-4cc9-9f40-ef0ccce1fa28",
+         "0221-103811-ebtpy15-v2n",
+         35,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "8287",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         35,
+         "2026-02-21T11:36:53.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "8560d47a-0803-44fc-b208-0dd82bf55533",
+         "0221-103811-ebtpy15-v2n",
+         34,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "9548",
+          "numOutputRows": "294"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         34,
+         "2026-02-21T11:36:51.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "ff678215-173b-45cf-93b0-68f43514f025",
+         "0221-103811-ebtpy15-v2n",
+         32,
+         "WriteSerializable",
+         true,
+         {
+          "conflictDetectionTimeMs": "119",
+          "numFiles": "1",
+          "numOutputBytes": "7906",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         33,
+         "2026-02-21T11:36:50.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "OPTIMIZE",
+         {
+          "auto": "true",
+          "batchId": "0",
+          "clusterBy": "[]",
+          "predicate": "[]",
+          "zOrderBy": "[]"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "39943e97-6398-465b-8276-68555de40306",
+         "0221-103811-ebtpy15-v2n",
+         31,
+         "SnapshotIsolation",
+         false,
+         {
+          "conflictDetectionTimeMs": "85",
+          "maxFileSize": "54479",
+          "minFileSize": "54479",
+          "numAddedBytes": "54479",
+          "numAddedFiles": "1",
+          "numDeletionVectorsRemoved": "0",
+          "numRemovedBytes": "259240",
+          "numRemovedFiles": "32",
+          "p25FileSize": "54479",
+          "p50FileSize": "54479",
+          "p75FileSize": "54479"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         32,
+         "2026-02-21T11:36:48.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "a3baa1f4-2c6a-4abe-a742-8378cf969b33",
+         "0221-103811-ebtpy15-v2n",
+         31,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7225",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         31,
+         "2026-02-21T11:36:46.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "39943e97-6398-465b-8276-68555de40306",
+         "0221-103811-ebtpy15-v2n",
+         30,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7591",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         30,
+         "2026-02-21T11:36:44.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "745fb7ed-ad7f-477a-9f40-862739d9534d",
+         "0221-103811-ebtpy15-v2n",
+         29,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "8287",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         29,
+         "2026-02-21T11:12:56.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "e5219e76-3641-4c0c-b8b3-c856071d4a4f",
+         "0221-103811-ebtpy15-v2n",
+         28,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "9548",
+          "numOutputRows": "294"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         28,
+         "2026-02-21T11:12:54.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "ff9f41d2-8bab-4fe6-8fd6-4c653c7cf4ce",
+         "0221-103811-ebtpy15-v2n",
+         27,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7906",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         27,
+         "2026-02-21T11:12:52.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "f928f416-ebdc-4abc-85f3-805fc24dd3a5",
+         "0221-103811-ebtpy15-v2n",
+         26,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7225",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         26,
+         "2026-02-21T11:12:49.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "326b1588-43d0-4dd7-8a0c-c98424bcec03",
+         "0221-103811-ebtpy15-v2n",
+         25,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7591",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         25,
+         "2026-02-21T11:12:47.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "7e6f92bb-3b0f-47a9-bedf-ae614cf17ef6",
+         "0221-103811-ebtpy15-v2n",
+         24,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "8287",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         24,
+         "2026-02-21T10:40:11.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "0ead2f4b-3688-48bf-9598-62e5e0e88b63",
+         "0221-103811-ebtpy15-v2n",
+         23,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "9548",
+          "numOutputRows": "294"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         23,
+         "2026-02-21T10:40:08.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "0221fe69-faf2-4cb1-a0b4-9a45c835d829",
+         "0221-103811-ebtpy15-v2n",
+         22,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7906",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         22,
+         "2026-02-21T10:40:06.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "08d668f9-d8b4-41d7-b4e3-80da1fb78108",
+         "0221-103811-ebtpy15-v2n",
+         21,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7225",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         21,
+         "2026-02-21T10:40:03.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "75ecf505-5757-45b1-8fa4-aeb57193f89f",
+         "0221-103811-ebtpy15-v2n",
+         20,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7591",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         20,
+         "2026-02-21T10:40:00.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "f9d9eaa5-7ebb-4c4c-889b-7a563b7b62f3",
+         "0221-103811-ebtpy15-v2n",
+         19,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "8287",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         19,
+         "2026-02-14T13:11:38.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "bdae819e-5f61-4fad-a732-85ad6826b9e8",
+         "0214-131041-o32588r7-v2n",
+         18,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "9549",
+          "numOutputRows": "294"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         18,
+         "2026-02-14T13:11:34.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "b2661235-e66f-4b08-9cfb-dd02854d4293",
+         "0214-131041-o32588r7-v2n",
+         17,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7907",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         17,
+         "2026-02-14T13:11:31.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "d251affb-c459-4681-9b70-7f4063736b96",
+         "0214-131041-o32588r7-v2n",
+         16,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7226",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         16,
+         "2026-02-14T13:11:28.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "daf13785-6086-4ac5-94e1-488385596f88",
+         "0214-131041-o32588r7-v2n",
+         15,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7592",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         15,
+         "2026-02-14T13:11:24.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "456777b4-1f00-4d40-ba8a-ab1b85483477",
+         "0214-131041-o32588r7-v2n",
+         14,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "8288",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         14,
+         "2026-02-13T21:08:16.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "d88d7225-fc19-49c2-9939-1bce4748cb07",
+         "0213-210635-16sj3sfp-v2n",
+         13,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "9549",
+          "numOutputRows": "294"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         13,
+         "2026-02-13T21:08:13.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "3850ce70-1af5-46a7-b0fa-e705bc48d269",
+         "0213-210635-16sj3sfp-v2n",
+         12,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7907",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         12,
+         "2026-02-13T21:08:10.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "06caafa3-1d52-43c3-a086-4f3ec0893869",
+         "0213-210635-16sj3sfp-v2n",
+         11,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7226",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         11,
+         "2026-02-13T21:08:07.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "8ab482a6-b830-481a-b12b-589cd218fd4a",
+         "0213-210635-16sj3sfp-v2n",
+         10,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7592",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         10,
+         "2026-02-13T21:08:04.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         "c230d9d5-1c9f-4a24-ab01-404000841953",
+         "0213-210635-16sj3sfp-v2n",
+         9,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "8288",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/18.0.x-aarch64-photon-scala2.13"
+        ],
+        [
+         9,
+         "2026-02-10T21:56:12.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         null,
+         "0210-214128-2adgjkrl-v2n",
+         8,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "9549",
+          "numOutputRows": "294"
+         },
+         null,
+         "Databricks-Runtime/17.3.x-aarch64-photon-scala2.13"
+        ],
+        [
+         8,
+         "2026-02-10T21:56:10.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         null,
+         "0210-214128-2adgjkrl-v2n",
+         7,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7907",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/17.3.x-aarch64-photon-scala2.13"
+        ],
+        [
+         7,
+         "2026-02-10T21:56:08.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         null,
+         "0210-214128-2adgjkrl-v2n",
+         6,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7226",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/17.3.x-aarch64-photon-scala2.13"
+        ],
+        [
+         6,
+         "2026-02-10T21:56:06.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         null,
+         "0210-214128-2adgjkrl-v2n",
+         5,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7592",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/17.3.x-aarch64-photon-scala2.13"
+        ],
+        [
+         5,
+         "2026-02-10T21:56:04.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         null,
+         "0210-214128-2adgjkrl-v2n",
+         4,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "8288",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/17.3.x-aarch64-photon-scala2.13"
+        ],
+        [
+         4,
+         "2026-02-10T21:48:44.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         null,
+         "0210-214128-2adgjkrl-v2n",
+         3,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "9549",
+          "numOutputRows": "294"
+         },
+         null,
+         "Databricks-Runtime/17.3.x-aarch64-photon-scala2.13"
+        ],
+        [
+         3,
+         "2026-02-10T21:48:42.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         null,
+         "0210-214128-2adgjkrl-v2n",
+         2,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7907",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/17.3.x-aarch64-photon-scala2.13"
+        ],
+        [
+         2,
+         "2026-02-10T21:48:39.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         null,
+         "0210-214128-2adgjkrl-v2n",
+         1,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7226",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/17.3.x-aarch64-photon-scala2.13"
+        ],
+        [
+         1,
+         "2026-02-10T21:48:37.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "WRITE",
+         {
+          "mode": "Append",
+          "partitionBy": "[]",
+          "statsOnLoad": "false"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         null,
+         "0210-214128-2adgjkrl-v2n",
+         0,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "7592",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/17.3.x-aarch64-photon-scala2.13"
+        ],
+        [
+         0,
+         "2026-02-10T21:48:35.000Z",
+         "71445245683791",
+         "n.najmehakbari@gmail.com",
+         "CREATE TABLE AS SELECT",
+         {
+          "clusterBy": "[]",
+          "description": null,
+          "isManaged": "true",
+          "partitionBy": "[]",
+          "properties": "{\"delta.enableDeletionVectors\":\"true\"}",
+          "statsOnLoad": "true"
+         },
+         null,
+         [
+          "2199524748115638"
+         ],
+         null,
+         "0210-214128-2adgjkrl-v2n",
+         null,
+         "WriteSerializable",
+         true,
+         {
+          "numFiles": "1",
+          "numOutputBytes": "8288",
+          "numOutputRows": "292"
+         },
+         null,
+         "Databricks-Runtime/17.3.x-aarch64-photon-scala2.13"
+        ]
+       ],
+       "datasetInfos": [
+        {
+         "name": "_sqldf",
+         "schema": {
+          "fields": [
+           {
+            "metadata": {},
+            "name": "version",
+            "nullable": true,
+            "type": "long"
+           },
+           {
+            "metadata": {},
+            "name": "timestamp",
+            "nullable": true,
+            "type": "timestamp"
+           },
+           {
+            "metadata": {},
+            "name": "userId",
+            "nullable": true,
+            "type": "string"
+           },
+           {
+            "metadata": {},
+            "name": "userName",
+            "nullable": true,
+            "type": "string"
+           },
+           {
+            "metadata": {},
+            "name": "operation",
+            "nullable": true,
+            "type": "string"
+           },
+           {
+            "metadata": {},
+            "name": "operationParameters",
+            "nullable": true,
+            "type": {
+             "keyType": "string",
+             "type": "map",
+             "valueContainsNull": true,
+             "valueType": "string"
+            }
+           },
+           {
+            "metadata": {},
+            "name": "job",
+            "nullable": true,
+            "type": {
+             "fields": [
+              {
+               "metadata": {},
+               "name": "jobId",
+               "nullable": true,
+               "type": "string"
+              },
+              {
+               "metadata": {},
+               "name": "jobName",
+               "nullable": true,
+               "type": "string"
+              },
+              {
+               "metadata": {},
+               "name": "jobRunId",
+               "nullable": true,
+               "type": "string"
+              },
+              {
+               "metadata": {},
+               "name": "runId",
+               "nullable": true,
+               "type": "string"
+              },
+              {
+               "metadata": {},
+               "name": "jobOwnerId",
+               "nullable": true,
+               "type": "string"
+              },
+              {
+               "metadata": {},
+               "name": "triggerType",
+               "nullable": true,
+               "type": "string"
+              }
+             ],
+             "type": "struct"
+            }
+           },
+           {
+            "metadata": {},
+            "name": "notebook",
+            "nullable": true,
+            "type": {
+             "fields": [
+              {
+               "metadata": {},
+               "name": "notebookId",
+               "nullable": true,
+               "type": "string"
+              }
+             ],
+             "type": "struct"
+            }
+           },
+           {
+            "metadata": {},
+            "name": "queryHistoryStatementId",
+            "nullable": true,
+            "type": "string"
+           },
+           {
+            "metadata": {},
+            "name": "clusterId",
+            "nullable": true,
+            "type": "string"
+           },
+           {
+            "metadata": {},
+            "name": "readVersion",
+            "nullable": true,
+            "type": "long"
+           },
+           {
+            "metadata": {},
+            "name": "isolationLevel",
+            "nullable": true,
+            "type": "string"
+           },
+           {
+            "metadata": {},
+            "name": "isBlindAppend",
+            "nullable": true,
+            "type": "boolean"
+           },
+           {
+            "metadata": {},
+            "name": "operationMetrics",
+            "nullable": true,
+            "type": {
+             "keyType": "string",
+             "type": "map",
+             "valueContainsNull": true,
+             "valueType": "string"
+            }
+           },
+           {
+            "metadata": {},
+            "name": "userMetadata",
+            "nullable": true,
+            "type": "string"
+           },
+           {
+            "metadata": {},
+            "name": "engineInfo",
+            "nullable": true,
+            "type": "string"
+           }
+          ],
+          "type": "struct"
+         },
+         "tableIdentifier": null,
+         "typeStr": "pyspark.sql.connect.dataframe.DataFrame"
+        }
+       ],
+       "dbfsResultPath": null,
+       "isJsonSchema": true,
+       "metadata": {
+        "createTempViewForImplicitDf": true,
+        "dataframeName": "_sqldf",
+        "executionCount": 52
+       },
+       "overflow": false,
+       "plotOptions": {
+        "customPlotOptions": {},
+        "displayType": "table",
+        "pivotAggregation": null,
+        "pivotColumns": null,
+        "xColumns": null,
+        "yColumns": null
+       },
+       "removedWidgets": [],
+       "schema": [
+        {
+         "metadata": "{}",
+         "name": "version",
+         "type": "\"long\""
+        },
+        {
+         "metadata": "{}",
+         "name": "timestamp",
+         "type": "\"timestamp\""
+        },
+        {
+         "metadata": "{}",
+         "name": "userId",
+         "type": "\"string\""
+        },
+        {
+         "metadata": "{}",
+         "name": "userName",
+         "type": "\"string\""
+        },
+        {
+         "metadata": "{}",
+         "name": "operation",
+         "type": "\"string\""
+        },
+        {
+         "metadata": "{}",
+         "name": "operationParameters",
+         "type": "{\"keyType\":\"string\",\"type\":\"map\",\"valueContainsNull\":true,\"valueType\":\"string\"}"
+        },
+        {
+         "metadata": "{}",
+         "name": "job",
+         "type": "{\"fields\":[{\"metadata\":{},\"name\":\"jobId\",\"nullable\":true,\"type\":\"string\"},{\"metadata\":{},\"name\":\"jobName\",\"nullable\":true,\"type\":\"string\"},{\"metadata\":{},\"name\":\"jobRunId\",\"nullable\":true,\"type\":\"string\"},{\"metadata\":{},\"name\":\"runId\",\"nullable\":true,\"type\":\"string\"},{\"metadata\":{},\"name\":\"jobOwnerId\",\"nullable\":true,\"type\":\"string\"},{\"metadata\":{},\"name\":\"triggerType\",\"nullable\":true,\"type\":\"string\"}],\"type\":\"struct\"}"
+        },
+        {
+         "metadata": "{}",
+         "name": "notebook",
+         "type": "{\"fields\":[{\"metadata\":{},\"name\":\"notebookId\",\"nullable\":true,\"type\":\"string\"}],\"type\":\"struct\"}"
+        },
+        {
+         "metadata": "{}",
+         "name": "queryHistoryStatementId",
+         "type": "\"string\""
+        },
+        {
+         "metadata": "{}",
+         "name": "clusterId",
+         "type": "\"string\""
+        },
+        {
+         "metadata": "{}",
+         "name": "readVersion",
+         "type": "\"long\""
+        },
+        {
+         "metadata": "{}",
+         "name": "isolationLevel",
+         "type": "\"string\""
+        },
+        {
+         "metadata": "{}",
+         "name": "isBlindAppend",
+         "type": "\"boolean\""
+        },
+        {
+         "metadata": "{}",
+         "name": "operationMetrics",
+         "type": "{\"keyType\":\"string\",\"type\":\"map\",\"valueContainsNull\":true,\"valueType\":\"string\"}"
+        },
+        {
+         "metadata": "{}",
+         "name": "userMetadata",
+         "type": "\"string\""
+        },
+        {
+         "metadata": "{}",
+         "name": "engineInfo",
+         "type": "\"string\""
+        }
+       ],
+       "type": "table"
+      }
+     },
+     "output_type": "display_data"
+    }
+   ],
+   "source": [
+    "%sql\n",
+    "DESCRIBE HISTORY weather_bronze"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 0,
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "a99aa569-2af4-495b-b64d-a9bc7728b95a",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "outputs": [
+    {
+     "output_type": "stream",
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "INFO:py4j.clientserver:Received command c on object id p0\n"
+     ]
+    },
+    {
+     "output_type": "stream",
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Bronze Layer Shape: (14620, 5) -> (Rows, Columns)\nSilver Layer Shape: (1462, 5) -> (Data Quality applied)\nGold Layer Shape:   (1461, 3)   -> (Features engineered)\n\n--- Columns in Gold Layer ---\n['date', 'prev_day_temp', 'meantemp']\n"
+     ]
+    }
+   ],
+   "source": [
+    "# \n",
+    "def get_spark_shape(df):\n",
+    "    return (df.count(), len(df.columns))\n",
+    "\n",
+    "# Read from Bronze, Silver, and Gold layers\n",
+    "bronze_df = spark.read.table(\"weather_bronze\")\n",
+    "silver_df = spark.read.table(\"weather_silver\")\n",
+    "gold_df = spark.read.table(\"weather_gold\")\n",
+    "\n",
+    "# Print shapes\n",
+    "print(f\"Bronze Layer Shape: {get_spark_shape(bronze_df)} -> (Rows, Columns)\")\n",
+    "print(f\"Silver Layer Shape: {get_spark_shape(silver_df)} -> (Data Quality applied)\")\n",
+    "print(f\"Gold Layer Shape:   {get_spark_shape(gold_df)}   -> (Features engineered)\")\n",
+    "\n",
+    "print(\"\\n--- Columns in Gold Layer ---\")\n",
+    "print(gold_df.columns)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 0,
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "83df4179-4bdd-45d0-8aae-10582ea5c204",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "outputs": [
+    {
+     "output_type": "stream",
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Unit Test 1 Passed: Versioning history found.\nUnit Test 2 Passed: Silver layer successfully deduplicated to 1462 rows.\nUnit Test 3 Passed: Gold layer is clean and feature-engineered.\n"
+     ]
+    }
+   ],
+   "source": [
+    "# --- Unit Test 1: Validate Bronze History ---\n",
+    "history_df = spark.sql(\"DESCRIBE HISTORY weather_bronze\")\n",
+    "assert history_df.count() > 0, \"Test Failed: Bronze history is empty.\"\n",
+    "print(\"Unit Test 1 Passed: Versioning history found.\")\n",
+    "\n",
+    "# --- Unit Test 2: Validate Silver Deduplication ---\n",
+    "# Silver count must equal unique dates in Bronze\n",
+    "unique_dates = spark.table(\"weather_bronze\").select(\"date\").distinct().count()\n",
+    "silver_count = spark.table(\"weather_silver\").count()\n",
+    "assert silver_count == unique_dates, f\"Test Failed: Silver count ({silver_count}) != Unique dates ({unique_dates}).\"\n",
+    "print(f\"Unit Test 2 Passed: Silver layer successfully deduplicated to {silver_count} rows.\")\n",
+    "\n",
+    "# --- Unit Test 3: Validate Gold Feature Engineering ---\n",
+    "# Gold must have exactly 3 columns and no nulls\n",
+    "gold_df = spark.table(\"weather_gold\")\n",
+    "assert len(gold_df.columns) == 3, \"Test Failed: Gold layer does not have 3 columns.\"\n",
+    "assert gold_df.filter(col(\"prev_day_temp\").isNull()).count() == 0, \"Test Failed: Null values found in lag features.\"\n",
+    "print(\"Unit Test 3 Passed: Gold layer is clean and feature-engineered.\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "236813d1-4ab3-4d3a-8c33-4840e64e2664",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "source": [
+    "## **Assignment 4 starts here.**\n",
+    "\n",
+    "\n",
+    "**1. Delta Table Lineage and Versioning**\n",
+    "\n",
+    " This part accesses the Delta Lake transaction log to retrieve the history of the weather_gold table. Its purpose is to programmatically identify the latest data version, which is a mandatory requirement for establishing an explicit linkage between the data version and the model version.\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 0,
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "aa27bd63-6c36-41ff-b187-c8761e269b64",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "outputs": [
+    {
+     "output_type": "stream",
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "INFO:py4j.clientserver:Received command c on object id p0\n"
+     ]
+    },
+    {
+     "output_type": "display_data",
+     "data": {
+      "text/html": [
+       "<style scoped>\n",
+       "  .table-result-container {\n",
+       "    max-height: 300px;\n",
+       "    overflow: auto;\n",
+       "  }\n",
+       "  table, th, td {\n",
+       "    border: 1px solid black;\n",
+       "    border-collapse: collapse;\n",
+       "  }\n",
+       "  th, td {\n",
+       "    padding: 5px;\n",
+       "  }\n",
+       "  th {\n",
+       "    text-align: left;\n",
+       "  }\n",
+       "</style><div class='table-result-container'><table class='table-result'><thead style='background-color: white'><tr><th>version</th><th>timestamp</th><th>operation</th><th>operationParameters</th></tr></thead><tbody><tr><td>7</td><td>2026-02-21T15:19:29.000Z</td><td>CREATE OR REPLACE TABLE AS SELECT</td><td>Map(partitionBy -> [], clusterBy -> [], description -> null, isManaged -> true, properties -> {\"delta.parquet.compression.codec\":\"zstd\",\"delta.enableDeletionVectors\":\"true\"}, statsOnLoad -> true)</td></tr><tr><td>6</td><td>2026-02-21T15:01:32.000Z</td><td>CREATE OR REPLACE TABLE AS SELECT</td><td>Map(partitionBy -> [], clusterBy -> [], description -> null, isManaged -> true, properties -> {\"delta.parquet.compression.codec\":\"zstd\",\"delta.enableDeletionVectors\":\"true\"}, statsOnLoad -> true)</td></tr><tr><td>5</td><td>2026-02-21T11:44:44.000Z</td><td>CREATE OR REPLACE TABLE AS SELECT</td><td>Map(partitionBy -> [], clusterBy -> [], description -> null, isManaged -> true, properties -> {\"delta.parquet.compression.codec\":\"zstd\",\"delta.enableDeletionVectors\":\"true\"}, statsOnLoad -> true)</td></tr><tr><td>4</td><td>2026-02-21T11:36:59.000Z</td><td>CREATE OR REPLACE TABLE AS SELECT</td><td>Map(partitionBy -> [], clusterBy -> [], description -> null, isManaged -> true, properties -> {\"delta.parquet.compression.codec\":\"zstd\",\"delta.enableDeletionVectors\":\"true\"}, statsOnLoad -> true)</td></tr><tr><td>3</td><td>2026-02-21T11:13:02.000Z</td><td>CREATE OR REPLACE TABLE AS SELECT</td><td>Map(partitionBy -> [], clusterBy -> [], description -> null, isManaged -> true, properties -> {\"delta.parquet.compression.codec\":\"zstd\",\"delta.enableDeletionVectors\":\"true\"}, statsOnLoad -> true)</td></tr><tr><td>2</td><td>2026-02-21T10:40:22.000Z</td><td>CREATE OR REPLACE TABLE AS SELECT</td><td>Map(partitionBy -> [], clusterBy -> [], description -> null, isManaged -> true, properties -> {\"delta.parquet.compression.codec\":\"zstd\",\"delta.enableDeletionVectors\":\"true\"}, statsOnLoad -> true)</td></tr><tr><td>1</td><td>2026-02-14T13:11:47.000Z</td><td>CREATE OR REPLACE TABLE AS SELECT</td><td>Map(partitionBy -> [], clusterBy -> [], description -> null, isManaged -> true, properties -> {\"delta.parquet.compression.codec\":\"zstd\",\"delta.enableDeletionVectors\":\"true\"}, statsOnLoad -> true)</td></tr><tr><td>0</td><td>2026-02-13T21:10:47.000Z</td><td>CREATE OR REPLACE TABLE AS SELECT</td><td>Map(partitionBy -> [], clusterBy -> [], description -> null, isManaged -> true, properties -> {\"delta.parquet.compression.codec\":\"zstd\",\"delta.enableDeletionVectors\":\"true\"}, statsOnLoad -> true)</td></tr></tbody></table></div>"
+      ]
+     },
+     "metadata": {
+      "application/vnd.databricks.v1+output": {
+       "addedWidgets": {},
+       "aggData": [],
+       "aggError": "",
+       "aggOverflow": false,
+       "aggSchema": [],
+       "aggSeriesLimitReached": false,
+       "aggType": "",
+       "arguments": {},
+       "columnCustomDisplayInfos": {},
+       "data": [
+        [
+         7,
+         "2026-02-21T15:19:29.000Z",
+         "CREATE OR REPLACE TABLE AS SELECT",
+         {
+          "clusterBy": "[]",
+          "description": null,
+          "isManaged": "true",
+          "partitionBy": "[]",
+          "properties": "{\"delta.parquet.compression.codec\":\"zstd\",\"delta.enableDeletionVectors\":\"true\"}",
+          "statsOnLoad": "true"
+         }
+        ],
+        [
+         6,
+         "2026-02-21T15:01:32.000Z",
+         "CREATE OR REPLACE TABLE AS SELECT",
+         {
+          "clusterBy": "[]",
+          "description": null,
+          "isManaged": "true",
+          "partitionBy": "[]",
+          "properties": "{\"delta.parquet.compression.codec\":\"zstd\",\"delta.enableDeletionVectors\":\"true\"}",
+          "statsOnLoad": "true"
+         }
+        ],
+        [
+         5,
+         "2026-02-21T11:44:44.000Z",
+         "CREATE OR REPLACE TABLE AS SELECT",
+         {
+          "clusterBy": "[]",
+          "description": null,
+          "isManaged": "true",
+          "partitionBy": "[]",
+          "properties": "{\"delta.parquet.compression.codec\":\"zstd\",\"delta.enableDeletionVectors\":\"true\"}",
+          "statsOnLoad": "true"
+         }
+        ],
+        [
+         4,
+         "2026-02-21T11:36:59.000Z",
+         "CREATE OR REPLACE TABLE AS SELECT",
+         {
+          "clusterBy": "[]",
+          "description": null,
+          "isManaged": "true",
+          "partitionBy": "[]",
+          "properties": "{\"delta.parquet.compression.codec\":\"zstd\",\"delta.enableDeletionVectors\":\"true\"}",
+          "statsOnLoad": "true"
+         }
+        ],
+        [
+         3,
+         "2026-02-21T11:13:02.000Z",
+         "CREATE OR REPLACE TABLE AS SELECT",
+         {
+          "clusterBy": "[]",
+          "description": null,
+          "isManaged": "true",
+          "partitionBy": "[]",
+          "properties": "{\"delta.parquet.compression.codec\":\"zstd\",\"delta.enableDeletionVectors\":\"true\"}",
+          "statsOnLoad": "true"
+         }
+        ],
+        [
+         2,
+         "2026-02-21T10:40:22.000Z",
+         "CREATE OR REPLACE TABLE AS SELECT",
+         {
+          "clusterBy": "[]",
+          "description": null,
+          "isManaged": "true",
+          "partitionBy": "[]",
+          "properties": "{\"delta.parquet.compression.codec\":\"zstd\",\"delta.enableDeletionVectors\":\"true\"}",
+          "statsOnLoad": "true"
+         }
+        ],
+        [
+         1,
+         "2026-02-14T13:11:47.000Z",
+         "CREATE OR REPLACE TABLE AS SELECT",
+         {
+          "clusterBy": "[]",
+          "description": null,
+          "isManaged": "true",
+          "partitionBy": "[]",
+          "properties": "{\"delta.parquet.compression.codec\":\"zstd\",\"delta.enableDeletionVectors\":\"true\"}",
+          "statsOnLoad": "true"
+         }
+        ],
+        [
+         0,
+         "2026-02-13T21:10:47.000Z",
+         "CREATE OR REPLACE TABLE AS SELECT",
+         {
+          "clusterBy": "[]",
+          "description": null,
+          "isManaged": "true",
+          "partitionBy": "[]",
+          "properties": "{\"delta.parquet.compression.codec\":\"zstd\",\"delta.enableDeletionVectors\":\"true\"}",
+          "statsOnLoad": "true"
+         }
+        ]
+       ],
+       "datasetInfos": [],
+       "dbfsResultPath": null,
+       "isJsonSchema": true,
+       "metadata": {},
+       "overflow": false,
+       "plotOptions": {
+        "customPlotOptions": {},
+        "displayType": "table",
+        "pivotAggregation": null,
+        "pivotColumns": null,
+        "xColumns": null,
+        "yColumns": null
+       },
+       "removedWidgets": [],
+       "schema": [
+        {
+         "metadata": "{}",
+         "name": "version",
+         "type": "\"long\""
+        },
+        {
+         "metadata": "{}",
+         "name": "timestamp",
+         "type": "\"timestamp\""
+        },
+        {
+         "metadata": "{}",
+         "name": "operation",
+         "type": "\"string\""
+        },
+        {
+         "metadata": "{}",
+         "name": "operationParameters",
+         "type": "{\"keyType\":\"string\",\"type\":\"map\",\"valueContainsNull\":true,\"valueType\":\"string\"}"
+        }
+       ],
+       "type": "table"
+      }
+     },
+     "output_type": "display_data"
+    },
+    {
+     "output_type": "stream",
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Latest weather_gold Delta version: 7\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Gold table history (Delta versions)\n",
+    "gold_history = spark.sql(\"DESCRIBE HISTORY weather_gold\")\n",
+    "display(gold_history.select(\"version\", \"timestamp\", \"operation\", \"operationParameters\"))\n",
+    "\n",
+    "latest_gold_version = gold_history.agg({\"version\":\"max\"}).collect()[0][0]\n",
+    "print(\"Latest weather_gold Delta version:\", latest_gold_version)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "597ef8f6-0682-492e-a5e9-b95de79537d8",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "source": [
+    "**2. Time-Series Data Splitting**\n",
+    "\n",
+    "This section prepares the dataset for training by implementing a temporal split. Unlike standard shuffling, this respects the chronological order of climate data. An 80/20 split is used to create a training set and a validation set, ensuring that the model is evaluated on \"future\" data relative to its training."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 0,
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "e7c6e86a-f151-4d7d-b593-3e2611928f0a",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "outputs": [
+    {
+     "output_type": "stream",
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Train data\n"
+     ]
+    },
+    {
+     "output_type": "display_data",
+     "data": {
+      "text/html": [
+       "<style scoped>\n",
+       "  .table-result-container {\n",
+       "    max-height: 300px;\n",
+       "    overflow: auto;\n",
+       "  }\n",
+       "  table, th, td {\n",
+       "    border: 1px solid black;\n",
+       "    border-collapse: collapse;\n",
+       "  }\n",
+       "  th, td {\n",
+       "    padding: 5px;\n",
+       "  }\n",
+       "  th {\n",
+       "    text-align: left;\n",
+       "  }\n",
+       "</style><div class='table-result-container'><table class='table-result'><thead style='background-color: white'><tr><th>date</th><th>prev_day_temp</th><th>meantemp</th></tr></thead><tbody><tr><td>2013-01-02</td><td>10.0</td><td>7.4</td></tr><tr><td>2013-01-03</td><td>7.4</td><td>7.166666666666667</td></tr><tr><td>2013-01-04</td><td>7.166666666666667</td><td>8.666666666666666</td></tr><tr><td>2013-01-05</td><td>8.666666666666666</td><td>6.0</td></tr><tr><td>2013-01-06</td><td>6.0</td><td>7.0</td></tr></tbody></table></div>"
+      ]
+     },
+     "metadata": {
+      "application/vnd.databricks.v1+output": {
+       "addedWidgets": {},
+       "aggData": [],
+       "aggError": "",
+       "aggOverflow": false,
+       "aggSchema": [],
+       "aggSeriesLimitReached": false,
+       "aggType": "",
+       "arguments": {},
+       "columnCustomDisplayInfos": {},
+       "data": [
+        [
+         "2013-01-02",
+         10.0,
+         7.4
+        ],
+        [
+         "2013-01-03",
+         7.4,
+         7.166666666666667
+        ],
+        [
+         "2013-01-04",
+         7.166666666666667,
+         8.666666666666666
+        ],
+        [
+         "2013-01-05",
+         8.666666666666666,
+         6.0
+        ],
+        [
+         "2013-01-06",
+         6.0,
+         7.0
+        ]
+       ],
+       "datasetInfos": [],
+       "dbfsResultPath": null,
+       "isJsonSchema": true,
+       "metadata": {},
+       "overflow": false,
+       "plotOptions": {
+        "customPlotOptions": {},
+        "displayType": "table",
+        "pivotAggregation": null,
+        "pivotColumns": null,
+        "xColumns": null,
+        "yColumns": null
+       },
+       "removedWidgets": [],
+       "schema": [
+        {
+         "metadata": "{}",
+         "name": "date",
+         "type": "\"string\""
+        },
+        {
+         "metadata": "{}",
+         "name": "prev_day_temp",
+         "type": "\"double\""
+        },
+        {
+         "metadata": "{}",
+         "name": "meantemp",
+         "type": "\"double\""
+        }
+       ],
+       "type": "table"
+      }
+     },
+     "output_type": "display_data"
+    },
+    {
+     "output_type": "stream",
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Valid data\n"
+     ]
+    },
+    {
+     "output_type": "display_data",
+     "data": {
+      "text/html": [
+       "<style scoped>\n",
+       "  .table-result-container {\n",
+       "    max-height: 300px;\n",
+       "    overflow: auto;\n",
+       "  }\n",
+       "  table, th, td {\n",
+       "    border: 1px solid black;\n",
+       "    border-collapse: collapse;\n",
+       "  }\n",
+       "  th, td {\n",
+       "    padding: 5px;\n",
+       "  }\n",
+       "  th {\n",
+       "    text-align: left;\n",
+       "  }\n",
+       "</style><div class='table-result-container'><table class='table-result'><thead style='background-color: white'><tr><th>date</th><th>prev_day_temp</th><th>meantemp</th></tr></thead><tbody><tr><td>2016-03-15</td><td>22.375</td><td>24.066666666666663</td></tr><tr><td>2016-04-13</td><td>30.2</td><td>31.75</td></tr><tr><td>2016-05-04</td><td>35.5</td><td>33.714285714285715</td></tr><tr><td>2016-05-15</td><td>36.5625</td><td>37.25</td></tr><tr><td>2016-05-17</td><td>37.21428571428572</td><td>37.5</td></tr></tbody></table></div>"
+      ]
+     },
+     "metadata": {
+      "application/vnd.databricks.v1+output": {
+       "addedWidgets": {},
+       "aggData": [],
+       "aggError": "",
+       "aggOverflow": false,
+       "aggSchema": [],
+       "aggSeriesLimitReached": false,
+       "aggType": "",
+       "arguments": {},
+       "columnCustomDisplayInfos": {},
+       "data": [
+        [
+         "2016-03-15",
+         22.375,
+         24.066666666666663
+        ],
+        [
+         "2016-04-13",
+         30.2,
+         31.75
+        ],
+        [
+         "2016-05-04",
+         35.5,
+         33.714285714285715
+        ],
+        [
+         "2016-05-15",
+         36.5625,
+         37.25
+        ],
+        [
+         "2016-05-17",
+         37.21428571428572,
+         37.5
+        ]
+       ],
+       "datasetInfos": [],
+       "dbfsResultPath": null,
+       "isJsonSchema": true,
+       "metadata": {},
+       "overflow": false,
+       "plotOptions": {
+        "customPlotOptions": {},
+        "displayType": "table",
+        "pivotAggregation": null,
+        "pivotColumns": null,
+        "xColumns": null,
+        "yColumns": null
+       },
+       "removedWidgets": [],
+       "schema": [
+        {
+         "metadata": "{}",
+         "name": "date",
+         "type": "\"string\""
+        },
+        {
+         "metadata": "{}",
+         "name": "prev_day_temp",
+         "type": "\"double\""
+        },
+        {
+         "metadata": "{}",
+         "name": "meantemp",
+         "type": "\"double\""
+        }
+       ],
+       "type": "table"
+      }
+     },
+     "output_type": "display_data"
+    }
+   ],
+   "source": [
+    "gold_df = spark.table(\"weather_gold\").orderBy(\"date\")\n",
+    "\n",
+    "n = gold_df.count()\n",
+    "train_n = int(n * 0.8)\n",
+    "\n",
+    "train_df = gold_df.limit(train_n)\n",
+    "valid_df = gold_df.subtract(train_df)\n",
+    "\n",
+    "print(\"Train data\")\n",
+    "display(train_df.limit(5))\n",
+    "\n",
+    "print(\"Valid data\")\n",
+    "display(valid_df.limit(5))"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 0,
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "d7de7127-2179-4798-9c49-f55862b25f79",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "outputs": [],
+   "source": [
+    "#os.environ[\"MLFLOW_DFS_TMP\"] = \"/Volumes/main/default/mlflow_tmp\"\n",
+    "#os.environ[\"MLFLOW_DFS_TMP\"] = \"/Volumes/workspace/mlops/mlflow_tmp\""
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "9cb1b3dd-18df-475d-93a9-efe3f6943dad",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "source": [
+    "**3. Model Registration and Traning**\n",
+    "\n",
+    "The purpose of this call is to save the trained model into the MLflow Model Registry. By including a signature, you define the expected input (prev_day_temp) and output (meantemp) schemas, which ensures model reproducibility and prevents errors during production scoring."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 0,
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "70b3c63f-0f03-41fb-9cce-49a35d0dde29",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "outputs": [
+    {
+     "output_type": "stream",
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Validation RMSE: 1.6784 | MAE: 1.2744\n"
+     ]
+    },
+    {
+     "output_type": "display_data",
+     "data": {
+      "application/vnd.jupyter.widget-view+json": {
+       "model_id": "cd663e078ccf474daab7294d289a1c21",
+       "version_major": 2,
+       "version_minor": 0
+      },
+      "text/plain": [
+       "Uploading artifacts:   0%|          | 0/11 [00:00<?, ?it/s]"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    },
+    {
+     "output_type": "stream",
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "Registered model 'DelhiClimateModel' already exists. Creating a new version of this model...\n"
+     ]
+    },
+    {
+     "output_type": "display_data",
+     "data": {
+      "application/vnd.jupyter.widget-view+json": {
+       "model_id": "9ba3aa87dc5f4b5d83d087ae3d74d547",
+       "version_major": 2,
+       "version_minor": 0
+      },
+      "text/plain": [
+       "Uploading artifacts:   0%|          | 0/11 [00:00<?, ?it/s]"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    },
+    {
+     "output_type": "stream",
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "Created version '10' of model 'workspace.default.delhiclimatemodel'.\n"
+     ]
+    }
+   ],
+   "source": [
+    "# -------------------------\n",
+    "# Train + Log + Register (UC-safe: signature + input_example)\n",
+    "# -------------------------\n",
+    "import numpy as np\n",
+    "import mlflow\n",
+    "import mlflow.sklearn\n",
+    "from sklearn.linear_model import LinearRegression\n",
+    "from sklearn.metrics import mean_squared_error, mean_absolute_error\n",
+    "from mlflow.models.signature import infer_signature\n",
+    "\n",
+    "# 1) Convert Spark train/valid -> Pandas (needed for sklearn)\n",
+    "train_pd = train_df.orderBy(\"date\").toPandas()\n",
+    "valid_pd = valid_df.orderBy(\"date\").toPandas()\n",
+    "\n",
+    "X_train = train_pd[[\"prev_day_temp\"]]\n",
+    "y_train = train_pd[\"meantemp\"]\n",
+    "\n",
+    "X_valid = valid_pd[[\"prev_day_temp\"]]\n",
+    "y_valid = valid_pd[\"meantemp\"]\n",
+    "\n",
+    "# 2) Train model\n",
+    "model = LinearRegression()\n",
+    "model.fit(X_train, y_train)\n",
+    "\n",
+    "# 3) Validation KPIs\n",
+    "valid_preds = model.predict(X_valid)\n",
+    "rmse = float(np.sqrt(mean_squared_error(y_valid, valid_preds)))\n",
+    "mae  = float(mean_absolute_error(y_valid, valid_preds))\n",
+    "\n",
+    "print(f\"Validation RMSE: {rmse:.4f} | MAE: {mae:.4f}\")\n",
+    "\n",
+    "# 4) Link model to latest Gold delta version\n",
+    "gold_version = spark.sql(\"DESCRIBE HISTORY weather_gold\") \\\n",
+    "    .agg({\"version\":\"max\"}).collect()[0][0]\n",
+    "\n",
+    "# 5) MLflow setup\n",
+    "mlflow.set_experiment(\"/Users/n.najmehakbari@gmail.com/Delhi_Climate_ModelOps\")\n",
+    "\n",
+    "# Avoid \"run already active\" error\n",
+    "if mlflow.active_run() is not None:\n",
+    "    mlflow.end_run()\n",
+    "\n",
+    "# 6) UC-compliant logging: signature + input_example\n",
+    "input_example = X_train.head(1).copy()\n",
+    "signature = infer_signature(input_example, model.predict(input_example))\n",
+    "\n",
+    "with mlflow.start_run(run_name=f\"LR_Gold_V{gold_version}\"):\n",
+    "\n",
+    "    mlflow.log_param(\"model_type\", \"LinearRegression\")\n",
+    "    mlflow.log_param(\"gold_delta_version\", int(gold_version))\n",
+    "    mlflow.log_param(\"split_ratio\", 0.8)\n",
+    "    mlflow.log_param(\"features\", \"prev_day_temp\")\n",
+    "    mlflow.log_param(\"target\", \"meantemp\")\n",
+    "\n",
+    "    mlflow.log_metric(\"rmse\", rmse)\n",
+    "    mlflow.log_metric(\"mae\", mae)\n",
+    "\n",
+    "    mlflow.sklearn.log_model(\n",
+    "        sk_model=model,\n",
+    "        artifact_path=\"model\",\n",
+    "        registered_model_name=\"DelhiClimateModel\",\n",
+    "        signature=signature,\n",
+    "        input_example=input_example\n",
+    "    )"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "70d45cc8-a095-4da0-993a-023b9610632c",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "source": [
+    "**4. Experiment Tracking Evidence**\n",
+    "\n",
+    "This block retrieves and prints metadata from the active MLflow session, such as the run_id and experiment_id. This serves as verifiable evidence required for the deliverable to prove that the ModelOps pipeline was executed and tracked in a managed environment."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 0,
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "a2c5064e-d86d-4d33-b86a-be633de45d55",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "outputs": [
+    {
+     "output_type": "stream",
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "No active MLflow run (you already ended it). This is fine.\nRegistered model name: DelhiClimateModel\n"
+     ]
+    }
+   ],
+   "source": [
+    "# -------------------------\n",
+    "# (A) Evidence: print current MLflow run + model registry info\n",
+    "# -------------------------\n",
+    "current_run = mlflow.active_run()\n",
+    "if current_run is not None:\n",
+    "    run_id = current_run.info.run_id\n",
+    "    exp_id = current_run.info.experiment_id\n",
+    "    print(\"MLflow run_id:\", run_id)\n",
+    "    print(\"MLflow experiment_id:\", exp_id)\n",
+    "else:\n",
+    "    print(\"No active MLflow run (you already ended it). This is fine.\")\n",
+    "\n",
+    "print(\"Registered model name: DelhiClimateModel\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "d985d619-8065-4f91-975b-a987863eb7dc",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "source": [
+    "**5. Persistent ModelOps State Management**\n",
+    "\n",
+    "This part creates a dedicated Delta table (modelops_state) to act as a \"memory\" for the pipeline. By storing the last_trained_gold_version, the system can keep track of which data version the current model is based on, enabling the automation logic required for the assignment."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 0,
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "4e3eb5f0-ad4c-4e28-ba37-3ac0d845fd90",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "outputs": [
+    {
+     "output_type": "stream",
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "INFO:py4j.clientserver:Received command c on object id p0\n"
+     ]
+    }
+   ],
+   "source": [
+    "# -------------------------\n",
+    "# (B) Track last trained Gold delta version in a Delta table (simple ModelOps state)\n",
+    "#     This is used to decide if retraining is needed when Gold changes.\n",
+    "# -------------------------\n",
+    "spark.sql(\"\"\"\n",
+    "CREATE TABLE IF NOT EXISTS modelops_state (\n",
+    "  key STRING,\n",
+    "  value STRING\n",
+    ") USING delta\n",
+    "\"\"\")\n",
+    "\n",
+    "def get_state(key: str):\n",
+    "    rows = spark.table(\"modelops_state\").filter(col(\"key\") == key).select(\"value\").collect()\n",
+    "    return rows[0][\"value\"] if rows else None\n",
+    "\n",
+    "def set_state(key: str, value: str):\n",
+    "    spark.sql(f\"DELETE FROM modelops_state WHERE key = '{key}'\")\n",
+    "    spark.createDataFrame([(key, value)], [\"key\", \"value\"]).write.mode(\"append\").saveAsTable(\"modelops_state\")\n",
+    "\n",
+    "def get_latest_gold_version() -> int:\n",
+    "    return int(\n",
+    "        spark.sql(\"DESCRIBE HISTORY weather_gold\")\n",
+    "        .agg({\"version\": \"max\"})\n",
+    "        .collect()[0][0]\n",
+    "    )"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "f62f7457-cb07-42bf-b33a-bc0867152bc3",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "source": [
+    "**6. Automated Retraining Function**\n",
+    "\n",
+    "This is the core logic for Model Lifecycle Management. It encapsulates the entire process—data loading, time-splitting, training, KPI calculation (RMSE and MAE), and MLflow logging—into a single reusable function. It ensures that every time a model is created, its parameters and metrics are logged consistently."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 0,
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "788d0c6d-06da-4e6b-9b03-708a077c726f",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "outputs": [],
+   "source": [
+    "# -------------------------\n",
+    "# (C) Retrain function (sklearn) that:\n",
+    "#     - reads Gold (ordered by date)\n",
+    "#     - time-splits into train/valid\n",
+    "#     - trains LR\n",
+    "#     - logs params/metrics\n",
+    "#     - registers new model version in MLflow registry\n",
+    "# -------------------------\n",
+    "def retrain_and_register_sklearn(\n",
+    "    gold_version: int,\n",
+    "    experiment_path: str = \"/Users/n.najmehakbari@gmail.com/Delhi_Climate_ModelOps\",\n",
+    "    registered_model_name: str = \"DelhiClimateModel\",\n",
+    "    split_ratio: float = 0.8,\n",
+    "):\n",
+    "    # Load Gold ordered by date\n",
+    "    gold_pd = spark.table(\"weather_gold\").orderBy(\"date\").toPandas()\n",
+    "\n",
+    "    # Features/target\n",
+    "    X_all = gold_pd[[\"prev_day_temp\"]]\n",
+    "    y_all = gold_pd[\"meantemp\"]\n",
+    "\n",
+    "    # Time-based split\n",
+    "    split = int(len(gold_pd) * split_ratio)\n",
+    "    X_train, y_train = X_all.iloc[:split], y_all.iloc[:split]\n",
+    "    X_valid, y_valid = X_all.iloc[split:], y_all.iloc[split:]\n",
+    "\n",
+    "    # Setup MLflow experiment\n",
+    "    mlflow.set_experiment(experiment_path)\n",
+    "\n",
+    "    # Signature (same as your earlier one)\n",
+    "    input_schema = Schema([ColSpec(\"double\", \"prev_day_temp\")])\n",
+    "    output_schema = Schema([ColSpec(\"double\", \"prediction\")])\n",
+    "    signature = ModelSignature(inputs=input_schema, outputs=output_schema)\n",
+    "    if mlflow.active_run() is not None:\n",
+    "        mlflow.end_run()\n",
+    "\n",
+    "    with mlflow.start_run(run_name=f\"LR_Gold_V{gold_version}\"):\n",
+    "\n",
+    "        # Train\n",
+    "        model = LinearRegression()\n",
+    "        model.fit(X_train, y_train)\n",
+    "\n",
+    "        # Validate KPIs\n",
+    "        valid_preds = model.predict(X_valid)\n",
+    "        rmse = float(np.sqrt(mean_squared_error(y_valid, valid_preds)))\n",
+    "        mae  = float(mean_absolute_error(y_valid, valid_preds))\n",
+    "\n",
+    "        # Log linkage + parameters\n",
+    "        mlflow.log_param(\"model_type\", \"LinearRegression\")\n",
+    "        mlflow.log_param(\"gold_delta_version\", int(gold_version))\n",
+    "        mlflow.log_param(\"split_ratio\", split_ratio)\n",
+    "        mlflow.log_param(\"features\", \"prev_day_temp\")\n",
+    "        mlflow.log_param(\"target\", \"meantemp\")\n",
+    "\n",
+    "        # Log KPIs (Primary: RMSE, Secondary: MAE)\n",
+    "        mlflow.log_metric(\"rmse\", rmse)\n",
+    "        mlflow.log_metric(\"mae\", mae)\n",
+    "\n",
+    "        # Log & register model (creates new registry version)\n",
+    "        mlflow.sklearn.log_model(\n",
+    "            sk_model=model,\n",
+    "            artifact_path=\"model\",\n",
+    "            registered_model_name=registered_model_name,\n",
+    "            signature=signature\n",
+    "        )\n",
+    "\n",
+    "        print(f\"✅ Logged + registered {registered_model_name} for Gold version {gold_version}\")\n",
+    "        print(f\"Validation RMSE: {rmse:.4f} | MAE: {mae:.4f}\")\n",
+    "\n",
+    "    return model"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "7b310e92-ceff-460f-9df3-eaf83f5a411a",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "source": [
+    "**7. Continuous Model Update (CMU) Logic**\n",
+    "\n",
+    "This block implements the Continuous Model Update mechanism. It compares the latest version of the Gold data against the version stored in the modelops_state table. If new data is detected (e.g., a new batch from Assignment 3), it automatically triggers the retraining function, fulfilling the bonus requirement for automation."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 0,
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "c686cb38-3ca8-4618-abbe-3fb3c64a6d92",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "outputs": [
+    {
+     "output_type": "stream",
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Latest Gold delta version: 7\nLast trained Gold delta version: 5\n\uD83D\uDD01 New Gold version detected (or first run) -> retraining...\n"
+     ]
+    },
+    {
+     "output_type": "display_data",
+     "data": {
+      "application/vnd.jupyter.widget-view+json": {
+       "model_id": "3c13741fce634762be1179cdb2416fee",
+       "version_major": 2,
+       "version_minor": 0
+      },
+      "text/plain": [
+       "Uploading artifacts:   0%|          | 0/9 [00:00<?, ?it/s]"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    },
+    {
+     "output_type": "stream",
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "Registered model 'DelhiClimateModel' already exists. Creating a new version of this model...\n"
+     ]
+    },
+    {
+     "output_type": "display_data",
+     "data": {
+      "application/vnd.jupyter.widget-view+json": {
+       "model_id": "07bced823c484aa2a89653d02e6f72b5",
+       "version_major": 2,
+       "version_minor": 0
+      },
+      "text/plain": [
+       "Uploading artifacts:   0%|          | 0/9 [00:00<?, ?it/s]"
+      ]
+     },
+     "metadata": {},
+     "output_type": "display_data"
+    },
+    {
+     "output_type": "stream",
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "Created version '11' of model 'workspace.default.delhiclimatemodel'.\n"
+     ]
+    },
+    {
+     "output_type": "stream",
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "✅ Logged + registered DelhiClimateModel for Gold version 7\nValidation RMSE: 1.6784 | MAE: 1.2744\n✅ Updated state: last_trained_gold_version = 7\n"
+     ]
+    }
+   ],
+   "source": [
+    "# -------------------------\n",
+    "# (D) Continuous update logic:\n",
+    "#     - check latest Gold delta version\n",
+    "#     - compare with last trained version stored in modelops_state\n",
+    "#     - retrain only if new version exists\n",
+    "# -------------------------\n",
+    "latest_version = get_latest_gold_version()\n",
+    "last_trained = get_state(\"last_trained_gold_version\")\n",
+    "last_trained_int = int(last_trained) if last_trained is not None else None\n",
+    "\n",
+    "print(\"Latest Gold delta version:\", latest_version)\n",
+    "print(\"Last trained Gold delta version:\", last_trained_int)\n",
+    "\n",
+    "if last_trained_int is None or latest_version > last_trained_int:\n",
+    "    print(\"\uD83D\uDD01 New Gold version detected (or first run) -> retraining...\")\n",
+    "    model = retrain_and_register_sklearn(gold_version=latest_version)\n",
+    "    set_state(\"last_trained_gold_version\", str(latest_version))\n",
+    "    print(\"✅ Updated state: last_trained_gold_version =\", latest_version)\n",
+    "else:\n",
+    "    print(\"✅ No new Gold version -> skipping retraining\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "4eb3310c-0455-4f6e-ba9d-b8c05b58726d",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "source": [
+    "**8. Production Scoring on test.csv**\n",
+    "\n",
+    "This is a mandatory requirement to validate the model on a completely external dataset. It reproduces the exact feature engineering (lagging the temperature) used during training and generates final performance metrics (RMSE/MAE). These results serve as the final proof of the model's effectiveness in a simulated production environment.\n",
+    "\n",
+    "**9. Verification and Traceability**\n",
+    "\n",
+    "The final display of predictions against actual values provides clear visual evidence for the report. It allows you to verify that the temporal features were calculated correctly and that the model's predictions align with the climate trends in the test dataset."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 0,
+   "metadata": {
+    "application/vnd.databricks.v1+cell": {
+     "cellMetadata": {
+      "byteLimit": 2048000,
+      "rowLimit": 10000
+     },
+     "inputWidgets": {},
+     "nuid": "a5ac2447-008f-4abd-bb60-ddf7f045994b",
+     "showTitle": false,
+     "tableResultSettingsMap": {},
+     "title": ""
+    }
+   },
+   "outputs": [
+    {
+     "output_type": "stream",
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "\n==============================\nFINAL PRODUCTION RESULT (test.csv)\nRMSE: 1.6757278347025497\nMAE : 1.305134956793525\n==============================\n\n"
+     ]
+    },
+    {
+     "output_type": "display_data",
+     "data": {
+      "text/html": [
+       "<style scoped>\n",
+       "  .table-result-container {\n",
+       "    max-height: 300px;\n",
+       "    overflow: auto;\n",
+       "  }\n",
+       "  table, th, td {\n",
+       "    border: 1px solid black;\n",
+       "    border-collapse: collapse;\n",
+       "  }\n",
+       "  th, td {\n",
+       "    padding: 5px;\n",
+       "  }\n",
+       "  th {\n",
+       "    text-align: left;\n",
+       "  }\n",
+       "</style><div class='table-result-container'><table class='table-result'><thead style='background-color: white'><tr><th>date</th><th>prev_day_temp</th><th>meantemp</th><th>prediction</th></tr></thead><tbody><tr><td>2017-01-02</td><td>15.91304347826087</td><td>18.5</td><td>16.155656825526716</td></tr><tr><td>2017-01-03</td><td>18.5</td><td>17.11111111111111</td><td>18.67319982844745</td></tr><tr><td>2017-01-04</td><td>17.11111111111111</td><td>18.7</td><td>17.321577768055832</td></tr><tr><td>2017-01-05</td><td>18.7</td><td>18.38888888888889</td><td>18.867833405143845</td></tr><tr><td>2017-01-06</td><td>18.38888888888889</td><td>19.318181818181817</td><td>18.565070063616123</td></tr><tr><td>2017-01-07</td><td>19.318181818181817</td><td>14.708333333333334</td><td>19.469428096750875</td></tr><tr><td>2017-01-08</td><td>14.708333333333334</td><td>15.68421052631579</td><td>14.983271603578336</td></tr><tr><td>2017-01-09</td><td>15.68421052631579</td><td>14.571428571428571</td><td>15.932963946011393</td></tr><tr><td>2017-01-10</td><td>14.571428571428571</td><td>12.11111111111111</td><td>14.850040286196876</td></tr><tr><td>2017-01-11</td><td>12.11111111111111</td><td>11.0</td><td>12.45573835064601</td></tr></tbody></table></div>"
+      ]
+     },
+     "metadata": {
+      "application/vnd.databricks.v1+output": {
+       "addedWidgets": {},
+       "aggData": [],
+       "aggError": "",
+       "aggOverflow": false,
+       "aggSchema": [],
+       "aggSeriesLimitReached": false,
+       "aggType": "",
+       "arguments": {},
+       "columnCustomDisplayInfos": {},
+       "data": [
+        [
+         "2017-01-02",
+         15.91304347826087,
+         18.5,
+         16.155656825526716
+        ],
+        [
+         "2017-01-03",
+         18.5,
+         17.11111111111111,
+         18.67319982844745
+        ],
+        [
+         "2017-01-04",
+         17.11111111111111,
+         18.7,
+         17.321577768055832
+        ],
+        [
+         "2017-01-05",
+         18.7,
+         18.38888888888889,
+         18.867833405143845
+        ],
+        [
+         "2017-01-06",
+         18.38888888888889,
+         19.318181818181817,
+         18.565070063616123
+        ],
+        [
+         "2017-01-07",
+         19.318181818181817,
+         14.708333333333334,
+         19.469428096750875
+        ],
+        [
+         "2017-01-08",
+         14.708333333333334,
+         15.68421052631579,
+         14.983271603578336
+        ],
+        [
+         "2017-01-09",
+         15.68421052631579,
+         14.571428571428571,
+         15.932963946011393
+        ],
+        [
+         "2017-01-10",
+         14.571428571428571,
+         12.11111111111111,
+         14.850040286196876
+        ],
+        [
+         "2017-01-11",
+         12.11111111111111,
+         11.0,
+         12.45573835064601
+        ]
+       ],
+       "datasetInfos": [],
+       "dbfsResultPath": null,
+       "isJsonSchema": true,
+       "metadata": {},
+       "overflow": false,
+       "plotOptions": {
+        "customPlotOptions": {},
+        "displayType": "table",
+        "pivotAggregation": null,
+        "pivotColumns": null,
+        "xColumns": null,
+        "yColumns": null
+       },
+       "removedWidgets": [],
+       "schema": [
+        {
+         "metadata": "{}",
+         "name": "date",
+         "type": "\"string\""
+        },
+        {
+         "metadata": "{}",
+         "name": "prev_day_temp",
+         "type": "\"double\""
+        },
+        {
+         "metadata": "{}",
+         "name": "meantemp",
+         "type": "\"double\""
+        },
+        {
+         "metadata": "{}",
+         "name": "prediction",
+         "type": "\"double\""
+        }
+       ],
+       "type": "table"
+      }
+     },
+     "output_type": "display_data"
+    }
+   ],
+   "source": [
+    "# -------------------------\n",
+    "# (E) Production scoring on test.csv (MANDATORY)\n",
+    "#     - build prev_day_temp feature in the same way\n",
+    "#     - run predictions\n",
+    "#     - print final RMSE (evidence for report)\n",
+    "# -------------------------\n",
+    "# Adjust path if needed (DBFS / FileStore / Workspace)\n",
+    "test_csv_path = \"DailyDelhiClimateTest.csv\"\n",
+    "if not os.path.exists(test_csv_path):\n",
+    "    print(f\"⚠️ test.csv not found at: {test_csv_path}\")\n",
+    "    print(\"Update `test_csv_path` to the correct location in your environment.\")\n",
+    "else:\n",
+    "    test_pdf = pd.read_csv(test_csv_path)\n",
+    "\n",
+    "    # Apply same lag feature engineering as Gold\n",
+    "    test_pdf[\"prev_day_temp\"] = test_pdf[\"meantemp\"].shift(1)\n",
+    "    test_pdf = test_pdf.dropna()\n",
+    "\n",
+    "    X_test = test_pdf[[\"prev_day_temp\"]]\n",
+    "    y_test = test_pdf[\"meantemp\"]\n",
+    "\n",
+    "    final_preds = model.predict(X_test)\n",
+    "\n",
+    "    final_rmse = float(np.sqrt(mean_squared_error(y_test, final_preds)))\n",
+    "    final_mae  = float(mean_absolute_error(y_test, final_preds))\n",
+    "\n",
+    "    print(\"\\n==============================\")\n",
+    "    print(\"FINAL PRODUCTION RESULT (test.csv)\")\n",
+    "    print(\"RMSE:\", final_rmse)\n",
+    "    print(\"MAE :\", final_mae)\n",
+    "    print(\"==============================\\n\")\n",
+    "\n",
+    "    # Show a few predictions for evidence\n",
+    "    preview = test_pdf[[\"date\", \"prev_day_temp\", \"meantemp\"]].copy()\n",
+    "    preview[\"prediction\"] = final_preds\n",
+    "    display(preview.head(10))"
+   ]
+  }
+ ],
+ "metadata": {
+  "application/vnd.databricks.v1+notebook": {
+   "computePreferences": null,
+   "dashboards": [],
+   "environmentMetadata": {
+    "base_environment": "",
+    "environment_version": "4"
+   },
+   "inputWidgetPreferences": null,
+   "language": "python",
+   "notebookMetadata": {
+    "mostRecentlyExecutedCommandWithImplicitDF": {
+     "commandId": 8934982810074906,
+     "dataframes": [
+      "_sqldf"
+     ]
+    },
+    "pythonIndentUnit": 4
+   },
+   "notebookName": "Untitled Notebook 2026-02-10 23:38:18",
+   "widgets": {
+    "kaggle_key_input": {
+     "currentValue": "\"KGAT_86ae9d7f12562a83a674b22f0a73cb9c\"",
+     "nuid": "4bd24aef-5f12-4223-9c67-0a96f9de7d55",
+     "typedWidgetInfo": {
+      "autoCreated": false,
+      "defaultValue": "",
+      "label": "Enter Kaggle Key",
+      "name": "kaggle_key_input",
+      "options": {
+       "widgetDisplayType": "Text",
+       "validationRegex": null
+      },
+      "parameterDataType": "String"
+     },
+     "widgetInfo": {
+      "widgetType": "text",
+      "defaultValue": "",
+      "label": "Enter Kaggle Key",
+      "name": "kaggle_key_input",
+      "options": {
+       "widgetType": "text",
+       "autoCreated": null,
+       "validationRegex": null
+      }
+     }
+    }
+   }
+  },
+  "language_info": {
+   "name": "python"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 0
+}
